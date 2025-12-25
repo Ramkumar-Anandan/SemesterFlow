@@ -76,8 +76,9 @@ export const calculateProgramStats = (schedule: ScheduleRow[]): ProgramStats => 
     if (row.status === 'event') stats.eventDays++;
     if (row.status === 'working') {
       stats.workingDays++;
-      // Learning days are typically the working days where instruction can happen
-      stats.learningDays++;
+      // A learning day is a working day where at least one slot is occupied by a subject
+      const hasSubject = Object.values(row.slotMappings).some(m => m.type === 'subject');
+      if (hasSubject) stats.learningDays++;
     }
   });
 
@@ -90,15 +91,13 @@ export const calculateUtilizationStats = (config: SemesterConfig, schedule: Sche
     let utilizedSlots = 0;
 
     schedule.forEach(row => {
-      // Available slots are counts of this subject in working day pattern
       if (row.status === 'working') {
         Object.keys(row.slotMappings).forEach(slotId => {
           const mappedSubjectId = config.weeklyPattern[row.dayName as DayOfWeek]?.[slotId];
           if (mappedSubjectId === subject.id) {
             availableSlots++;
-            
-            // Check if it was actually utilized in the generated schedule
             const mapping = row.slotMappings[slotId];
+            // Utilized means it's not a "completed" placeholder
             if (mapping.type === 'subject' && !mapping.label.endsWith(' - completed')) {
               utilizedSlots++;
             }
@@ -107,7 +106,6 @@ export const calculateUtilizationStats = (config: SemesterConfig, schedule: Sche
       }
     });
 
-    // Special rule: subjects without LUs utilize all available slots
     if (subject.totalLUs === 0) {
       utilizedSlots = availableSlots;
     }
@@ -123,14 +121,12 @@ export const calculateUtilizationStats = (config: SemesterConfig, schedule: Sche
 
 export const calculateSemesterStats = (config: SemesterConfig, schedule: ScheduleRow[]): SemesterStats[] => {
   const stats: SemesterStats[] = [];
-  
-  // Identify the dates where each CA occurs (first day of CA)
   const caDates = config.cas.map(ca => {
     const firstCADay = schedule.find(row => row.status === 'ca' && row.reason?.includes(ca.label));
     return firstCADay ? firstCADay.date : null;
   });
 
-  // Filter: Exclude subjects where LU tracking is disabled (totalLUs === 0)
+  // Tracked subjects are those with LU tracking enabled (> 0)
   const trackedSubjects = config.subjects.filter(s => s.totalLUs > 0);
 
   trackedSubjects.forEach(subject => {
@@ -155,10 +151,8 @@ export const calculateSemesterStats = (config: SemesterConfig, schedule: Schedul
           }
         });
       }
-
       subjectPhases.push({ modulePlanned, completedBeforeCA });
     }
-
     stats.push({ subjectName: subject.name, phases: subjectPhases });
   });
 
@@ -190,7 +184,6 @@ export const exportToExcel = (schedule: ScheduleRow[], slots: SlotDefinition[], 
 
   const statsOutput: any[][] = [];
 
-  // 2a. Program Overview
   statsOutput.push(["PROGRAM-LEVEL STATISTICS"]);
   statsOutput.push(["Metric", "Value"]);
   statsOutput.push(["Total Semester Days", programStats.totalDays]);
@@ -202,16 +195,14 @@ export const exportToExcel = (schedule: ScheduleRow[], slots: SlotDefinition[], 
   statsOutput.push(["Total Learning Days", programStats.learningDays]);
   statsOutput.push([]);
 
-  // 2b. Slot Utilization
   statsOutput.push(["SUBJECT SLOT UTILIZATION"]);
-  statsOutput.push(["Subject Name", "Total Available Slots", "Utilized Slots (LUs)", "Unutilized Slots"]);
+  statsOutput.push(["Subject Name", "Total Available Slots", "Utilized Slots", "Unutilized Slots"]);
   utilizationStats.forEach(u => {
     statsOutput.push([u.subjectName, u.availableSlots, u.utilizedSlots, u.unutilizedSlots]);
   });
   statsOutput.push([]);
 
-  // 2c. Subject Phasing (Only Tracked Subjects)
-  statsOutput.push(["SUBJECT PHASING STATISTICS"]);
+  statsOutput.push(["SUBJECT PHASING STATISTICS (Tracked Only)"]);
   const maxPhases = config.cas.length;
   const phasingHeaders = ["Subject Name"];
   for (let i = 1; i <= maxPhases; i++) {
@@ -219,7 +210,8 @@ export const exportToExcel = (schedule: ScheduleRow[], slots: SlotDefinition[], 
   }
   statsOutput.push(phasingHeaders);
   phasingStats.forEach(s => {
-    const row = [s.subjectName];
+    // Fix: Explicitly type row as (string | number)[] to avoid TypeScript error when pushing numbers into an inferred string array.
+    const row: (string | number)[] = [s.subjectName];
     for (let i = 0; i < maxPhases; i++) {
       const p = s.phases[i];
       row.push(p?.modulePlanned ?? "-", p?.completedBeforeCA ?? 0);
@@ -256,7 +248,6 @@ export const generateMasterSchedule = (config: SemesterConfig): ScheduleRow[] =>
 
     const isHoliday = holidaySet.has(dateStr);
     const holidayReason = holidayMap.get(dateStr);
-    // Fix: Cast dayName to DayOfWeek to resolve potential union type compatibility issues in some environments.
     const isWorkingDayConfig = config.workingDays.includes(dayName as DayOfWeek);
     
     let status: ScheduleRow['status'] = 'working';

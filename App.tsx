@@ -475,7 +475,7 @@ const App: React.FC = () => {
                       { label: "Learning Days", val: programStats.learningDays, icon: <Target size={18}/>, color: "indigo" },
                     ].map((st, i) => (
                       <div key={i} className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm flex flex-col items-center text-center">
-                        <div className={`p-3 rounded-2xl mb-3 text-${st.color}-600 bg-${st.color}-50`}>{st.icon}</div>
+                        <div className={`p-3 rounded-2xl mb-3 ${st.color === 'slate' ? 'text-slate-600 bg-slate-50' : st.color === 'rose' ? 'text-rose-600 bg-rose-50' : st.color === 'indigo' ? 'text-indigo-600 bg-indigo-50' : st.color === 'amber' ? 'text-amber-600 bg-amber-50' : 'text-emerald-600 bg-emerald-50'}`}>{st.icon}</div>
                         <div className="text-2xl font-black text-slate-800 tracking-tighter leading-none">{st.val}</div>
                         <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-2">{st.label}</div>
                       </div>
