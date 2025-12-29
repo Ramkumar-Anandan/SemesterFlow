@@ -1,4 +1,3 @@
-
 import { format, addDays, parseISO, isValid, differenceInDays, isAfter, isBefore, isSameDay, addYears } from 'date-fns';
 import { SemesterConfig, ScheduleRow, DayOfWeek, Subject, CAConfig, WeeklyPattern, SlotDefinition, ModuleConfig } from '../types';
 import * as XLSX from 'xlsx';
@@ -31,6 +30,10 @@ const parseExcelDate = (val: any): string => {
   const isoDate = parseISO(strVal);
   if (isValid(isoDate)) return formatDate(isoDate);
   return strVal;
+};
+
+const formatTimeForExport = (timeStr: string): string => {
+  return timeStr.replace(':', '');
 };
 
 export interface SemesterStats {
@@ -76,7 +79,6 @@ export const calculateProgramStats = (schedule: ScheduleRow[]): ProgramStats => 
     if (row.status === 'event') stats.eventDays++;
     if (row.status === 'working') {
       stats.workingDays++;
-      // A learning day is a working day where at least one slot is occupied by a subject
       const hasSubject = Object.values(row.slotMappings).some(m => m.type === 'subject');
       if (hasSubject) stats.learningDays++;
     }
@@ -97,7 +99,6 @@ export const calculateUtilizationStats = (config: SemesterConfig, schedule: Sche
           if (mappedSubjectId === subject.id) {
             availableSlots++;
             const mapping = row.slotMappings[slotId];
-            // Utilized means it's not a "completed" placeholder
             if (mapping.type === 'subject' && !mapping.label.endsWith(' - completed')) {
               utilizedSlots++;
             }
@@ -126,7 +127,6 @@ export const calculateSemesterStats = (config: SemesterConfig, schedule: Schedul
     return firstCADay ? firstCADay.date : null;
   });
 
-  // Tracked subjects are those with LU tracking enabled (> 0)
   const trackedSubjects = config.subjects.filter(s => s.totalLUs > 0);
 
   trackedSubjects.forEach(subject => {
@@ -159,10 +159,61 @@ export const calculateSemesterStats = (config: SemesterConfig, schedule: Schedul
   return stats;
 };
 
+export const exportStructuredScheduleToExcel = (schedule: ScheduleRow[], slots: SlotDefinition[], config: SemesterConfig) => {
+  const wb = XLSX.utils.book_new();
+  
+  // Requirement: Row 1 mentions only the Squad Number value alone, without whitespace
+  const squadVal = (config.squadNumber || '').replace(/\s+/g, '');
+  const squadRow = [squadVal];
+  
+  // Requirement: Row 2 contains headers
+  const structuredHeaders = ["slot_number", "date", "from", "to", "course_id", "lu_id", "mentor_id"];
+  
+  const dataRows: (string | number)[][] = [];
+
+  schedule.forEach(row => {
+    slots.forEach((slot, slotIdx) => {
+      const mapping = row.slotMappings[slot.id];
+      if (mapping.type === 'subject') {
+        const subject = config.subjects.find(s => s.id === mapping.subjectId);
+        if (subject) {
+          let luId = "";
+          if (mapping.luNumber && subject.luIdMap && subject.luIdMap[mapping.luNumber]) {
+            luId = subject.luIdMap[mapping.luNumber];
+          } else {
+            luId = subject.defaultLuId || (mapping.luNumber ? `LU_${mapping.luNumber}` : "");
+          }
+
+          dataRows.push([
+            slotIdx + 1,
+            row.date,
+            formatTimeForExport(slot.startTime),
+            formatTimeForExport(slot.endTime),
+            subject.courseId || subject.id,
+            luId,
+            subject.mentorId || ""
+          ]);
+        }
+      }
+    });
+  });
+
+  // Assemble the final array of arrays
+  const finalSheetData = [
+    squadRow,
+    structuredHeaders,
+    ...dataRows
+  ];
+
+  const ws = XLSX.utils.aoa_to_sheet(finalSheetData);
+  XLSX.utils.book_append_sheet(wb, ws, "Structured Schedule");
+  XLSX.writeFile(wb, `${config.name.replace(/\s+/g, '_')}_Structured_Data.xlsx`);
+};
+
 export const exportToExcel = (schedule: ScheduleRow[], slots: SlotDefinition[], config: SemesterConfig) => {
   const wb = XLSX.utils.book_new();
 
-  // Sheet 1: Detailed Schedule
+  // Sheet 1: Detailed Schedule (Human Readable)
   const scheduleHeaders = ["Phase Wk/D", "Date", "Day", "Status", "Reason", ...slots.map(s => s.label)];
   const scheduleRowsData = schedule.map(row => {
     const slotContent = slots.map(slot => {
@@ -183,9 +234,9 @@ export const exportToExcel = (schedule: ScheduleRow[], slots: SlotDefinition[], 
   const utilizationStats = calculateUtilizationStats(config, schedule);
 
   const statsOutput: any[][] = [];
-
   statsOutput.push(["PROGRAM-LEVEL STATISTICS"]);
   statsOutput.push(["Metric", "Value"]);
+  statsOutput.push(["Squad Number", config.squadNumber || "N/A"]);
   statsOutput.push(["Total Semester Days", programStats.totalDays]);
   statsOutput.push(["Total Sundays", programStats.sundays]);
   statsOutput.push(["Total Public Holidays", programStats.holidays]);
@@ -210,7 +261,6 @@ export const exportToExcel = (schedule: ScheduleRow[], slots: SlotDefinition[], 
   }
   statsOutput.push(phasingHeaders);
   phasingStats.forEach(s => {
-    // Fix: Explicitly type row as (string | number)[] to avoid TypeScript error when pushing numbers into an inferred string array.
     const row: (string | number)[] = [s.subjectName];
     for (let i = 0; i < maxPhases; i++) {
       const p = s.phases[i];
@@ -276,20 +326,24 @@ export const generateMasterSchedule = (config: SemesterConfig): ScheduleRow[] =>
               slotMappings[slot.id] = { 
                 type: 'subject', 
                 label: `${subject.name} - LU ${currentLU}`, 
-                color: activeModule ? activeModule.color : subject.color 
+                color: activeModule ? activeModule.color : subject.color,
+                subjectId: subject.id,
+                luNumber: currentLU
               };
             } else {
               slotMappings[slot.id] = { 
                 type: 'subject', 
                 label: `${subject.name} - completed`, 
-                color: '#94a3b8' 
+                color: '#94a3b8',
+                subjectId: subject.id
               };
             }
           } else {
             slotMappings[slot.id] = { 
               type: 'subject', 
               label: subject.name, 
-              color: subject.color 
+              color: subject.color,
+              subjectId: subject.id
             };
           }
         } else {
@@ -350,6 +404,7 @@ export const downloadExcelTemplate = () => {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ["Property", "Value", "Format"],
     ["Semester Name", "Academic Plan", "Text"],
+    ["Squad Number", "Squad 42", "Text"],
     ["Start Date", "2025-12-15", "YYYY-MM-DD or DD/MM/YYYY"],
     ["End Date", "2026-04-21", "YYYY-MM-DD or DD/MM/YYYY"],
     ["Working Days", "Monday, Tuesday, Wednesday, Thursday, Friday", "Comma separated"]
@@ -358,7 +413,8 @@ export const downloadExcelTemplate = () => {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ["Name", "Total LUs", "Base Color (Hex Code)"],
     ["Applied Physics", "20", "#6366f1"],
-    ["General Elective", "0", "#ec4899"]
+    ["Growth Coaching", "0", "#ec4899"],
+    ["IWI", "0", "#10b981"]
   ]), "2. Subjects");
 
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
@@ -369,7 +425,7 @@ export const downloadExcelTemplate = () => {
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ["Day", "Period 1"],
     ["Monday", "Applied Physics"],
-    ["Tuesday", "General Elective"]
+    ["Tuesday", "Growth Coaching"]
   ]), "4. Weekly Pattern");
 
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
@@ -384,9 +440,21 @@ export const downloadExcelTemplate = () => {
 
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ["Subject Name", "Module Name", "Start LU", "End LU", "Color (Hex)"],
-    ["Applied Physics", "Module 1", "1", "10", "#ef4444"],
-    ["Applied Physics", "Module 2", "11", "20", "#3b82f6"]
+    ["Applied Physics", "Module 1", "1", "10", "#ef4444"]
   ]), "7. Modules");
+
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ["Course Name", "Course ID", "Default LU ID", "Mentor ID"],
+    ["Applied Physics", "PHYS101", "", "M001"],
+    ["Growth Coaching", "GRW100", "GH_SESSION", "M005"],
+    ["IWI", "IWI200", "IWI_WORK", "M010"]
+  ]), "8. ID Mapping");
+
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ["Applied Physics", "", "Growth Coaching", ""],
+    ["LU Number", "LU ID", "LU Number", "LU ID"],
+    [1, "AP_LU_1", 1, "GH_LU_1"]
+  ]), "9. LU ID Mapping");
 
   XLSX.writeFile(wb, "SemesterFlow_LU_Template.xlsx");
 };
@@ -407,6 +475,7 @@ export const parseExcelImport = async (file: File): Promise<Partial<SemesterConf
           const rows = XLSX.utils.sheet_to_json<any>(sSheet, { header: 1 });
           rows.forEach((r: any) => {
             if (r[0] === "Semester Name") config.name = String(r[1]);
+            if (r[0] === "Squad Number") config.squadNumber = String(r[1] || "");
             if (r[0] === "Start Date") config.startDate = parseExcelDate(r[1]);
             if (r[0] === "End Date") config.endDate = parseExcelDate(r[1]);
             if (r[0] === "Working Days") config.workingDays = (String(r[1] || "")).split(',').map((s: string) => s.trim() as DayOfWeek);
@@ -424,11 +493,50 @@ export const parseExcelImport = async (file: File): Promise<Partial<SemesterConf
               name: String(r["Name"] || "Unnamed Subject"),
               totalLUs: (rawLU === undefined || rawLU === null || String(rawLU).trim() === "") ? 0 : (parseInt(rawLU) || 0),
               color: String(r["Base Color (Hex Code)"] || "#6366f1"),
-              modules: []
+              modules: [],
+              luIdMap: {}
             };
             subjectMapByName.set(subject.name, subject);
             return subject;
           });
+        }
+
+        // 8. ID Mapping
+        const idMappingSheet = workbook.Sheets["8. ID Mapping"];
+        if (idMappingSheet) {
+          const rows = XLSX.utils.sheet_to_json<any>(idMappingSheet);
+          rows.forEach((r: any) => {
+            const subject = subjectMapByName.get(String(r["Course Name"]));
+            if (subject) {
+              subject.courseId = String(r["Course ID"] || "");
+              subject.defaultLuId = String(r["Default LU ID"] || "");
+              subject.mentorId = String(r["Mentor ID"] || "");
+            }
+          });
+        }
+
+        // 9. LU ID Mapping
+        const luMappingSheet = workbook.Sheets["9. LU ID Mapping"];
+        if (luMappingSheet) {
+          const rows = XLSX.utils.sheet_to_json<any>(luMappingSheet, { header: 1 });
+          if (rows.length >= 2) {
+            const subjectNamesRow = rows[0];
+            for (let col = 0; col < subjectNamesRow.length; col += 2) {
+              const sName = subjectNamesRow[col];
+              if (!sName) continue;
+              const subject = subjectMapByName.get(String(sName));
+              if (subject) {
+                for (let rowIdx = 2; rowIdx < rows.length; rowIdx++) {
+                  const luNum = parseInt(rows[rowIdx][col]);
+                  const luId = rows[rowIdx][col+1];
+                  if (!isNaN(luNum) && luId) {
+                    if (!subject.luIdMap) subject.luIdMap = {};
+                    subject.luIdMap[luNum] = String(luId);
+                  }
+                }
+              }
+            }
+          }
         }
 
         // 7. Modules

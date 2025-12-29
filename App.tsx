@@ -28,20 +28,24 @@ import {
   List,
   Target,
   Activity,
-  CalendarCheck
+  CalendarCheck,
+  Database,
+  Table,
+  Users
 } from 'lucide-react';
 import { SemesterConfig, Subject, SlotDefinition, Holiday, CAConfig, ScheduleRow, ModuleConfig } from './types';
 import { DAYS_OF_WEEK, COURSE_COLORS } from './constants';
-import { generateMasterSchedule, downloadExcelTemplate, parseExcelImport, exportToExcel, calculateSemesterStats, calculateProgramStats, calculateUtilizationStats } from './utils/dateUtils';
+import { generateMasterSchedule, downloadExcelTemplate, parseExcelImport, exportToExcel, exportStructuredScheduleToExcel, calculateSemesterStats, calculateProgramStats, calculateUtilizationStats } from './utils/dateUtils';
 
 const App: React.FC = () => {
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1); 
   const [loading, setLoading] = useState(false);
   const [editingSubjectModules, setEditingSubjectModules] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'detailed' | 'stats'>('detailed');
+  const [viewMode, setViewMode] = useState<'detailed' | 'stats' | 'structured'>('detailed');
 
   const [config, setConfig] = useState<SemesterConfig>({
     name: 'Academic Phased Plan',
+    squadNumber: '',
     startDate: '2025-01-06',
     endDate: '2025-05-30',
     workingDays: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
@@ -76,7 +80,7 @@ const App: React.FC = () => {
           weeklyPattern: importedData.weeklyPattern || prev.weeklyPattern,
           holidays: importedData.holidays || prev.holidays
         }));
-        alert("Success: Integrated Phased Plan and Learning Units.");
+        alert("Success: Integrated ID Mapping & Phased Plan.");
       } catch (err) {
         console.error(err);
         alert("Error: Invalid file format.");
@@ -96,7 +100,8 @@ const App: React.FC = () => {
         name: name.trim(),
         color: COURSE_COLORS[config.subjects.length % COURSE_COLORS.length],
         totalLUs: 0,
-        modules: []
+        modules: [],
+        luIdMap: {}
       }]
     });
   };
@@ -152,7 +157,7 @@ const App: React.FC = () => {
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[100] flex items-center justify-center">
           <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl flex flex-col items-center gap-4">
             <Loader2 className="animate-spin text-indigo-600" size={40} />
-            <p className="font-black text-slate-800 tracking-tight">Syncing Educational Modules...</p>
+            <p className="font-black text-slate-800 tracking-tight">Processing ID Mappings...</p>
           </div>
         </div>
       )}
@@ -233,7 +238,7 @@ const App: React.FC = () => {
           </div>
           <div>
             <h1 className="font-black text-xl tracking-tighter leading-none">SemesterFlow</h1>
-            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-1">Learning-Unit Phased Engine</p>
+            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-[0.2em] mt-1">ID-Mapped Phased Engine</p>
           </div>
         </div>
         <div className="hidden lg:flex items-center gap-2">
@@ -255,9 +260,15 @@ const App: React.FC = () => {
               <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-200">
                 <h2 className="text-2xl font-black mb-8 flex items-center gap-3"><Settings className="text-indigo-500" /> General Config</h2>
                 <div className="space-y-8">
-                  <div>
-                    <label className="block text-[10px] font-black text-slate-400 mb-3 uppercase tracking-widest">Semester Name</label>
-                    <input value={config.name} onChange={e => setConfig({...config, name: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-3xl font-black text-xl outline-none" />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div>
+                      <label className="block text-[10px] font-black text-slate-400 mb-3 uppercase tracking-widest">Semester Name</label>
+                      <input value={config.name} onChange={e => setConfig({...config, name: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-3xl font-black text-xl outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black text-slate-400 mb-3 uppercase tracking-widest flex items-center gap-2"><Users size={12}/> Squad Number</label>
+                      <input placeholder="e.g. Squad 42" value={config.squadNumber} onChange={e => setConfig({...config, squadNumber: e.target.value})} className="w-full px-6 py-4 bg-slate-50 border border-slate-200 rounded-3xl font-black text-xl outline-none" />
+                    </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div>
@@ -283,10 +294,10 @@ const App: React.FC = () => {
             </div>
             <div className="space-y-6">
               <div className="bg-indigo-900 rounded-[3rem] p-10 text-white shadow-2xl">
-                <h3 className="text-xl font-black mb-4 flex items-center gap-3"><Layers className="text-emerald-400" /> Smart Phase Import</h3>
-                <p className="text-indigo-200 text-sm mb-8 leading-relaxed">System now supports Learning Unit (LU) sequential tracking and Module color highlighting from Excel.</p>
+                <h3 className="text-xl font-black mb-4 flex items-center gap-3"><Layers className="text-emerald-400" /> ID-Mapped Bulk Import</h3>
+                <p className="text-indigo-200 text-sm mb-8 leading-relaxed">System now supports detailed Course ID, Mentor ID, and LU ID mapping via Sheet 8 & 9.</p>
                 <div className="space-y-4">
-                  <button onClick={downloadExcelTemplate} className="w-full py-4 bg-indigo-800 hover:bg-indigo-700 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all"><Download size={16} /> Download Template</button>
+                  <button onClick={downloadExcelTemplate} className="w-full py-4 bg-indigo-800 hover:bg-indigo-700 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all"><Download size={16} /> Download ID Template</button>
                   <label className="w-full py-4 bg-emerald-500 hover:bg-emerald-400 rounded-2xl text-xs font-black flex items-center justify-center gap-2 transition-all cursor-pointer"><Upload size={16} /> Upload Filled File<input type="file" accept=".xlsx" className="hidden" onChange={handleFileUpload} /></label>
                 </div>
               </div>
@@ -330,7 +341,13 @@ const App: React.FC = () => {
                  {config.subjects.map(s => (
                    <div key={s.id} className="flex flex-col p-6 bg-slate-50/50 rounded-[2.5rem] border border-slate-100 hover:bg-white hover:shadow-xl transition-all">
                       <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-4"><div className="w-5 h-5 rounded-full shadow-sm" style={{backgroundColor: s.color}}></div><span className="font-black text-slate-700 text-lg tracking-tight">{s.name}</span></div>
+                        <div className="flex items-center gap-4">
+                          <div className="w-5 h-5 rounded-full shadow-sm" style={{backgroundColor: s.color}}></div>
+                          <div className="flex flex-col">
+                            <span className="font-black text-slate-700 text-lg tracking-tight">{s.name}</span>
+                            {s.courseId && <span className="text-[10px] text-indigo-500 font-bold uppercase tracking-wider">ID: {s.courseId} • Mentor: {s.mentorId || 'None'}</span>}
+                          </div>
+                        </div>
                         <button onClick={() => setConfig({...config, subjects: config.subjects.filter(sub => sub.id !== s.id)})} className="text-slate-300 hover:text-rose-500 p-2"><Trash2 size={18} /></button>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
@@ -400,18 +417,23 @@ const App: React.FC = () => {
                 <div className="flex-1">
                    <h2 className="text-4xl font-black text-slate-900 tracking-tighter leading-none">{config.name}</h2>
                    <div className="flex flex-wrap items-center gap-10 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] mt-5">
-                     <span className="flex items-center gap-3 px-5 py-2.5 bg-indigo-50 rounded-full text-indigo-700 border border-indigo-100 shadow-sm font-bold"><RefreshCw size={14}/> HYBRID LU TRACKER ACTIVE</span>
+                     <span className="flex items-center gap-3 px-5 py-2.5 bg-indigo-50 rounded-full text-indigo-700 border border-indigo-100 shadow-sm font-bold"><RefreshCw size={14}/> DB SYNC READY</span>
+                     <span className="flex items-center gap-3 px-5 py-2.5 bg-slate-100 rounded-full text-slate-600"><Users size={14}/> {config.squadNumber || 'Generic'}</span>
                      <span className="flex items-center gap-3 px-5 py-2.5 bg-slate-100 rounded-full text-slate-600"><Calendar size={14}/> {config.startDate} / {config.endDate}</span>
                    </div>
                 </div>
                 <div className="flex items-center gap-4 bg-slate-100 p-2 rounded-3xl border border-slate-200">
                   <button onClick={() => setViewMode('detailed')} className={`px-6 py-3.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all ${viewMode === 'detailed' ? 'bg-white text-indigo-600 shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}><List size={16}/> Detailed Plan</button>
+                  <button onClick={() => setViewMode('structured')} className={`px-6 py-3.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all ${viewMode === 'structured' ? 'bg-white text-indigo-600 shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}><Database size={16}/> DB Export View</button>
                   <button onClick={() => setViewMode('stats')} className={`px-6 py-3.5 rounded-2xl text-xs font-black flex items-center gap-2 transition-all ${viewMode === 'stats' ? 'bg-white text-indigo-600 shadow-lg' : 'text-slate-400 hover:text-slate-600'}`}><BarChart3 size={16}/> Statistics</button>
                 </div>
-                <button onClick={() => exportToExcel(masterSchedule, config.slots, config)} className="px-10 py-5 bg-slate-900 text-white rounded-[2rem] font-black flex items-center gap-3 shadow-2xl hover:bg-indigo-600 transition-all"><Download size={20} /> Download Excel Report</button>
+                <div className="flex flex-col gap-3">
+                  <button onClick={() => exportToExcel(masterSchedule, config.slots, config)} className="px-10 py-5 bg-slate-900 text-white rounded-[2rem] font-black flex items-center gap-3 shadow-2xl hover:bg-indigo-600 transition-all whitespace-nowrap"><Download size={20} /> Download Final Report</button>
+                  <button onClick={() => exportStructuredScheduleToExcel(masterSchedule, config.slots, config)} className="px-10 py-4 bg-indigo-600 text-white rounded-[2rem] font-black flex items-center gap-3 shadow-xl hover:bg-indigo-700 transition-all whitespace-nowrap"><Table size={18} /> Export Structured Data</button>
+                </div>
              </div>
 
-             {viewMode === 'detailed' ? (
+             {viewMode === 'detailed' && (
                <div className="bg-white rounded-[4rem] shadow-2xl border border-slate-200 overflow-hidden">
                   <div className="max-h-[80vh] overflow-y-auto print:max-h-none">
                     <table className="w-full border-collapse">
@@ -461,7 +483,62 @@ const App: React.FC = () => {
                     </table>
                   </div>
                </div>
-             ) : (
+             )}
+
+             {viewMode === 'structured' && (
+               <div className="bg-white rounded-[4rem] shadow-2xl border border-slate-200 overflow-hidden animate-in slide-in-from-bottom-4 duration-500">
+                  <div className="p-10 border-b bg-slate-50 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-xl font-black text-slate-800 flex items-center gap-2"><Database className="text-indigo-600"/> Structured Data View</h3>
+                      <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mt-1">Formatted with DB-compatible lowercase headers</p>
+                    </div>
+                    <button onClick={() => exportStructuredScheduleToExcel(masterSchedule, config.slots, config)} className="px-6 py-3 bg-indigo-600 text-white rounded-2xl text-xs font-black flex items-center gap-2 shadow-lg hover:bg-indigo-700 transition-all"><Download size={14}/> Download structured.xlsx</button>
+                  </div>
+                  <div className="max-h-[60vh] overflow-y-auto">
+                    <table className="w-full border-collapse">
+                      <thead>
+                        <tr className="bg-slate-900 text-white sticky top-0 z-10">
+                          {["slot_number", "date", "from", "to", "course_id", "lu_id", "mentor_id"].map(h => (
+                            <th key={h} className="p-4 text-[10px] font-black uppercase tracking-widest text-left">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {masterSchedule.flatMap(row => 
+                          config.slots.map((slot, sIdx) => {
+                            const mapping = row.slotMappings[slot.id];
+                            if (mapping.type !== 'subject') return null;
+                            const subject = config.subjects.find(s => s.id === mapping.subjectId);
+                            if (!subject) return null;
+                            
+                            // Fallback logic: mapping luNumber lookup -> defaultLuId -> generated fallback
+                            let luId = "";
+                            if (mapping.luNumber && subject.luIdMap && subject.luIdMap[mapping.luNumber]) {
+                              luId = subject.luIdMap[mapping.luNumber];
+                            } else {
+                              luId = subject.defaultLuId || (mapping.luNumber ? `LU_${mapping.luNumber}` : "");
+                            }
+
+                            return (
+                              <tr key={`${row.date}-${slot.id}`} className="hover:bg-slate-50/80 transition-all font-mono text-[10px]">
+                                <td className="p-4">{sIdx + 1}</td>
+                                <td className="p-4 font-bold">{row.date}</td>
+                                <td className="p-4">{slot.startTime.replace(':','')}</td>
+                                <td className="p-4">{slot.endTime.replace(':','')}</td>
+                                <td className="p-4 font-black text-indigo-600">{subject.courseId || subject.id}</td>
+                                <td className="p-4 text-emerald-600">{luId}</td>
+                                <td className="p-4 text-slate-500">{subject.mentorId || '—'}</td>
+                              </tr>
+                            );
+                          }).filter(Boolean)
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+               </div>
+             )}
+
+             {viewMode === 'stats' && (
                <div className="space-y-12 animate-in fade-in duration-500">
                   {/* Program Level Stats */}
                   <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">

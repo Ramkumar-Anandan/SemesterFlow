@@ -15,6 +15,11 @@ export interface Subject {
   color: string;
   totalLUs: number;
   modules: ModuleConfig[];
+  // New fields for structured export
+  courseId?: string;
+  mentorId?: string;
+  defaultLuId?: string; // Fallback LU ID if no sequential mapping is used
+  luIdMap?: Record<number, string>; // Maps LU number to specific LU ID string
 }
 
 export interface SlotDefinition {
@@ -48,6 +53,7 @@ export interface SemesterConfig {
   startDate: string;
   endDate: string;
   name: string;
+  squadNumber: string; // New field for squad identification
   workingDays: DayOfWeek[];
   slots: SlotDefinition[];
   subjects: Subject[];
@@ -68,6 +74,8 @@ export interface ScheduleRow {
       type: 'subject' | 'ca' | 'event' | 'empty';
       label: string;
       color?: string;
+      subjectId?: string; // Internal ID
+      luNumber?: number; // The sequence number of the LU
     };
   };
 }
