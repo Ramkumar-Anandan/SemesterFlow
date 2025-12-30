@@ -31,7 +31,8 @@ import {
   CalendarCheck,
   Database,
   Table,
-  Users
+  Users,
+  XCircle
 } from 'lucide-react';
 import { SemesterConfig, Subject, SlotDefinition, Holiday, CAConfig, ScheduleRow, ModuleConfig } from './types';
 import { DAYS_OF_WEEK, COURSE_COLORS } from './constants';
@@ -63,6 +64,24 @@ const App: React.FC = () => {
   const phasingStats = useMemo(() => calculateSemesterStats(config, masterSchedule), [config, masterSchedule]);
   const programStats = useMemo(() => calculateProgramStats(masterSchedule), [masterSchedule]);
   const utilizationStats = useMemo(() => calculateUtilizationStats(config, masterSchedule), [config, masterSchedule]);
+
+  const validateSubjectLUs = (subject: Subject): { valid: boolean; reason?: string } => {
+    if (subject.totalLUs === 0) return { valid: true };
+    if (subject.modules.length === 0) return { valid: false, reason: "No modules defined for a tracked subject." };
+    
+    const lastModule = subject.modules[subject.modules.length - 1];
+    if (lastModule.endLU !== subject.totalLUs) {
+      return { 
+        valid: false, 
+        reason: `Mismatch: Total LUs is ${subject.totalLUs}, but final Module (${lastModule.name}) ends at LU ${lastModule.endLU}.` 
+      };
+    }
+    return { valid: true };
+  };
+
+  const hasAnyValidationErrors = useMemo(() => {
+    return config.subjects.some(s => !validateSubjectLUs(s).valid);
+  }, [config.subjects]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -333,41 +352,67 @@ const App: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-200">
                <h2 className="text-2xl font-black mb-8 flex items-center gap-3"><BookOpen className="text-indigo-500" /> Subject & LU Management</h2>
+               {hasAnyValidationErrors && (
+                 <div className="mb-6 p-4 bg-rose-50 border border-rose-100 rounded-2xl flex items-center gap-3 animate-in slide-in-from-top-2">
+                   <AlertCircle className="text-rose-500 shrink-0" size={20} />
+                   <p className="text-[11px] font-black text-rose-700 uppercase tracking-tight">Warning: Some subjects have learning unit synchronization issues.</p>
+                 </div>
+               )}
                <div className="flex gap-4 mb-8">
                  <input id="sub-input" placeholder="Enter Subject..." className="flex-1 px-6 py-4 bg-slate-50 border border-slate-200 rounded-3xl font-bold outline-none shadow-inner" onKeyDown={e => { if (e.key === 'Enter') { addSubject(e.currentTarget.value); e.currentTarget.value = ''; } }} />
                  <button onClick={() => { const el = document.getElementById('sub-input') as HTMLInputElement; addSubject(el.value); el.value = ''; }} className="bg-indigo-600 text-white px-7 py-4 rounded-3xl shadow-xl shadow-indigo-100"><Plus /></button>
                </div>
                <div className="space-y-4">
-                 {config.subjects.map(s => (
-                   <div key={s.id} className="flex flex-col p-6 bg-slate-50/50 rounded-[2.5rem] border border-slate-100 hover:bg-white hover:shadow-xl transition-all">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-4">
-                          <div className="w-5 h-5 rounded-full shadow-sm" style={{backgroundColor: s.color}}></div>
-                          <div className="flex flex-col">
-                            <span className="font-black text-slate-700 text-lg tracking-tight">{s.name}</span>
-                            {s.courseId && <span className="text-[10px] text-indigo-500 font-bold uppercase tracking-wider">ID: {s.courseId} • Mentor: {s.mentorId || 'None'}</span>}
+                 {config.subjects.map(s => {
+                   const { valid, reason } = validateSubjectLUs(s);
+                   return (
+                     <div key={s.id} className={`flex flex-col p-6 rounded-[2.5rem] border transition-all ${!valid ? 'bg-rose-50/30 border-rose-200 shadow-sm' : 'bg-slate-50/50 border-slate-100 hover:bg-white hover:shadow-xl'}`}>
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-4">
+                            <div className="w-5 h-5 rounded-full shadow-sm" style={{backgroundColor: s.color}}></div>
+                            <div className="flex flex-col">
+                              <div className="flex items-center gap-2">
+                                <span className="font-black text-slate-700 text-lg tracking-tight">{s.name}</span>
+                                <div className="relative group">
+                                  {valid ? (
+                                    <CheckCircle2 size={18} className="text-emerald-500 drop-shadow-sm" />
+                                  ) : (
+                                    <>
+                                      <XCircle size={18} className="text-rose-500 drop-shadow-sm cursor-help animate-pulse" />
+                                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-50">
+                                        <div className="bg-slate-900 text-white text-[10px] font-bold px-4 py-2 rounded-xl shadow-2xl whitespace-nowrap border border-slate-700">
+                                          {reason}
+                                        </div>
+                                        <div className="w-2 h-2 bg-slate-900 rotate-45 absolute -bottom-1 left-1/2 -translate-x-1/2 border-r border-b border-slate-700"></div>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              </div>
+                              {s.courseId && <span className="text-[10px] text-indigo-500 font-bold uppercase tracking-wider">ID: {s.courseId} • Mentor: {s.mentorId || 'None'}</span>}
+                            </div>
+                          </div>
+                          <button onClick={() => setConfig({...config, subjects: config.subjects.filter(sub => sub.id !== s.id)})} className="text-slate-300 hover:text-rose-500 p-2"><Trash2 size={18} /></button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">Total LUs (0 = No Tracking)</label>
+                            <input type="number" min="0" value={s.totalLUs} onChange={e => updateSubjectLUs(s.id, parseInt(e.target.value) || 0)} className={`w-full bg-white border rounded-xl px-4 py-2 text-xs font-bold ${!valid ? 'border-rose-300 ring-4 ring-rose-50' : 'border-slate-200'}`} />
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">Module Highlighting</label>
+                            <button 
+                              onClick={() => setEditingSubjectModules(s.id)} 
+                              disabled={s.totalLUs <= 0}
+                              className={`w-full py-2 text-[10px] font-black uppercase rounded-xl border transition ${s.totalLUs <= 0 ? 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed' : 'bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100'}`}
+                            >
+                              Manage Modules ({s.modules.length})
+                            </button>
                           </div>
                         </div>
-                        <button onClick={() => setConfig({...config, subjects: config.subjects.filter(sub => sub.id !== s.id)})} className="text-slate-300 hover:text-rose-500 p-2"><Trash2 size={18} /></button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">Total LUs (0 = No Tracking)</label>
-                          <input type="number" min="0" value={s.totalLUs} onChange={e => updateSubjectLUs(s.id, parseInt(e.target.value) || 0)} className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-xs font-bold" />
-                        </div>
-                        <div>
-                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-2">Module Highlighting</label>
-                          <button 
-                            onClick={() => setEditingSubjectModules(s.id)} 
-                            disabled={s.totalLUs <= 0}
-                            className={`w-full py-2 text-[10px] font-black uppercase rounded-xl border transition ${s.totalLUs <= 0 ? 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed' : 'bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100'}`}
-                          >
-                            Manage Modules ({s.modules.length})
-                          </button>
-                        </div>
-                      </div>
-                   </div>
-                 ))}
+                     </div>
+                   );
+                 })}
                </div>
             </div>
             <div className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-200">
