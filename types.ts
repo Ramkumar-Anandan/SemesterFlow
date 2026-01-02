@@ -15,11 +15,11 @@ export interface Subject {
   color: string;
   totalLUs: number;
   modules: ModuleConfig[];
-  // New fields for structured export
-  courseId?: string;
+  courseId?: string; // Default/Global Course ID
   mentorId?: string;
-  defaultLuId?: string; // Fallback LU ID if no sequential mapping is used
-  luIdMap?: Record<number, string>; // Maps LU number to specific LU ID string
+  defaultLuId?: string;
+  luIdMap?: Record<number, string>; // Maps LU number to LU ID string
+  courseIdMap?: Record<number, string>; // Maps LU number to specific Course ID string
 }
 
 export interface SlotDefinition {
@@ -38,9 +38,9 @@ export interface Holiday {
 export interface CAConfig {
   id: string;
   label: string; 
-  weekOrder: number; // Weeks in current phase
-  duration: number; // Assessment days
-  eventDays: number; // Event days attached to this CA
+  weekOrder: number;
+  duration: number;
+  eventDays: number;
 }
 
 export interface WeeklyPattern {
@@ -53,7 +53,7 @@ export interface SemesterConfig {
   startDate: string;
   endDate: string;
   name: string;
-  squadNumber: string; // New field for squad identification
+  squadNumber: string;
   workingDays: DayOfWeek[];
   slots: SlotDefinition[];
   subjects: Subject[];
@@ -66,7 +66,8 @@ export interface ScheduleRow {
   date: string;
   dayName: string;
   weekNumber: number;
-  dayInWeek: number; // 1-7 (Relative to Phase Anchor)
+  dayInWeek: number;
+  phaseId?: string; // ID of the CA phase this row belongs to
   status: 'working' | 'holiday' | 'weekend' | 'blocked' | 'ca' | 'event';
   reason?: string;
   slotMappings: {
@@ -74,8 +75,9 @@ export interface ScheduleRow {
       type: 'subject' | 'ca' | 'event' | 'empty';
       label: string;
       color?: string;
-      subjectId?: string; // Internal ID
-      luNumber?: number; // The sequence number of the LU
+      subjectId?: string;
+      luNumber?: number;
+      courseId?: string; // Resolved Course ID for this specific slot
     };
   };
 }
